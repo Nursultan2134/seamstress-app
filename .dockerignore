@@ -1,0 +1,9 @@
+node_modules
+.next
+.git
+.env
+.env.example
+dev.log
+tsconfig.tsbuildinfo
+prisma/dev.db
+progress

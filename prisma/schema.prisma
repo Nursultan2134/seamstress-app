@@ -1,0 +1,229 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  OWNER
+  MANAGER
+  CUTTER
+  SEWER
+  QC
+  SHIPPER
+  IRONER
+}
+
+enum StageStatus {
+  PENDING
+  IN_PROGRESS
+  DONE
+}
+
+enum OrderStatus {
+  DRAFT
+  IN_PROGRESS
+  DONE
+  PICKED_UP
+}
+
+enum Currency {
+  KGS
+  USD
+}
+
+enum CostType {
+  THREAD
+  LABOR
+  MISC
+}
+
+model Workshop {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  employees    Employee[]
+  processTypes ProcessType[]
+  orders       Order[]
+  materials    WarehouseMaterial[]
+
+  @@map("workshops")
+}
+
+model Employee {
+  id         String   @id @default(cuid())
+  workshopId String
+  workshop   Workshop @relation(fields: [workshopId], references: [id], onDelete: Cascade)
+  fullName   String
+  role       Role
+  pinHash    String
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  rates             EmployeeRate[]
+  assignedStages    OrderStage[]      @relation("StageAssignee")
+  productionEntries ProductionEntry[]
+  daysOff           DayOff[]
+  loggedMaterials   WarehouseMaterial[] @relation("MaterialLoggedBy")
+
+  @@index([workshopId])
+  @@map("employees")
+}
+
+model ProcessType {
+  id          String   @id @default(cuid())
+  workshopId  String
+  workshop    Workshop @relation(fields: [workshopId], references: [id], onDelete: Cascade)
+  code        String
+  name        String
+  defaultRate Float    @default(0)
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+
+  orderStages   OrderStage[]
+  employeeRates EmployeeRate[]
+
+  @@unique([workshopId, code])
+  @@map("process_types")
+}
+
+model EmployeeRate {
+  id            String      @id @default(cuid())
+  employeeId    String
+  employee      Employee    @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  processTypeId String
+  processType   ProcessType @relation(fields: [processTypeId], references: [id], onDelete: Cascade)
+  rate          Float
+  createdAt     DateTime    @default(now())
+
+  @@unique([employeeId, processTypeId])
+  @@map("employee_rates")
+}
+
+model Order {
+  id           String      @id @default(cuid())
+  workshopId   String
+  workshop     Workshop    @relation(fields: [workshopId], references: [id], onDelete: Cascade)
+  orderNumber  String
+  clientName   String?
+  quantity     Int
+  pricePerUnit Float
+  currency     Currency    @default(KGS)
+  deadline     DateTime?
+  status       OrderStatus @default(DRAFT)
+  pickedUpAt   DateTime?
+  createdAt    DateTime    @default(now())
+
+  stages         OrderStage[]
+  materialUsages MaterialUsage[]
+  costs          OrderCost[]
+
+  @@unique([workshopId, orderNumber])
+  @@index([workshopId])
+  @@map("orders")
+}
+
+model OrderStage {
+  id                 String      @id @default(cuid())
+  orderId            String
+  order              Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  processTypeId      String
+  processType        ProcessType @relation(fields: [processTypeId], references: [id], onDelete: Restrict)
+  sequenceOrder      Int
+  assignedEmployeeId String
+  assignedEmployee   Employee    @relation("StageAssignee", fields: [assignedEmployeeId], references: [id], onDelete: Restrict)
+  quantity           Int
+  deadline           DateTime?
+  status             StageStatus @default(PENDING)
+  startedAt          DateTime?
+  finishedAt         DateTime?
+  createdAt          DateTime    @default(now())
+
+  materialUsages    MaterialUsage[]
+  productionEntries ProductionEntry[]
+
+  @@unique([orderId, sequenceOrder])
+  @@index([assignedEmployeeId, status])
+  @@map("order_stages")
+}
+
+model WarehouseMaterial {
+  id              String   @id @default(cuid())
+  workshopId      String
+  workshop        Workshop @relation(fields: [workshopId], references: [id], onDelete: Cascade)
+  name            String
+  metersTotal     Float
+  metersRemaining Float
+  purchaseCost    Float
+  currency        Currency @default(KGS)
+  purchasedAt     DateTime @default(now())
+  loggedById      String?
+  loggedBy        Employee? @relation("MaterialLoggedBy", fields: [loggedById], references: [id], onDelete: SetNull)
+  notes           String?
+
+  usages MaterialUsage[]
+
+  @@index([workshopId])
+  @@map("warehouse_materials")
+}
+
+model MaterialUsage {
+  id           String            @id @default(cuid())
+  materialId   String
+  material     WarehouseMaterial @relation(fields: [materialId], references: [id], onDelete: Restrict)
+  orderId      String
+  order        Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderStageId String?
+  orderStage   OrderStage?       @relation(fields: [orderStageId], references: [id], onDelete: SetNull)
+  metersUsed   Float
+  usedAt       DateTime          @default(now())
+
+  @@index([materialId])
+  @@index([orderId])
+  @@map("material_usages")
+}
+
+model OrderCost {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  type      CostType
+  amount    Float
+  currency  Currency @default(KGS)
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+  @@map("order_costs")
+}
+
+model ProductionEntry {
+  id                String     @id @default(cuid())
+  employeeId        String
+  employee          Employee   @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+  orderStageId      String
+  orderStage        OrderStage @relation(fields: [orderStageId], references: [id], onDelete: Cascade)
+  quantityCompleted Int
+  rateApplied       Float
+  date              DateTime   @default(now())
+  createdAt         DateTime   @default(now())
+
+  @@index([employeeId, date])
+  @@map("production_entries")
+}
+
+model DayOff {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date       DateTime
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  @@unique([employeeId, date])
+  @@map("days_off")
+}
